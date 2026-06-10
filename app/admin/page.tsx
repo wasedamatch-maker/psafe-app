@@ -370,7 +370,9 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
       setTimeout(() => setFlash(false), 1200);
     } catch (e) {
       console.error(e);
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = e instanceof Error ? e.message
+        : (e && typeof e === "object" && "message" in e) ? String((e as {message: unknown}).message)
+        : JSON.stringify(e);
       setErrMsg(msg);
       setSaving(false);
       return; // editingのままにして入力を維持
