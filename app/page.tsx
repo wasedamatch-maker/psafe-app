@@ -223,12 +223,33 @@ function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) 
   const [cls, setCls] = useState<number | null>(null);
   const [grp, setGrp] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fetchedTeams, setFetchedTeams] = useState<Team[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+
+  const handleSelectClass = async (cId: number) => {
+    setCls(cId);
+    setGrp(null);
+    setFetchedTeams([]);
+    setTeamsLoading(true);
+    try {
+      const teams = await getTeams(cId);
+      setFetchedTeams(teams);
+    } catch (e) {
+      console.error(e);
+    }
+    setTeamsLoading(false);
+  };
+
   const go = async () => {
     if (!cls || !grp) return;
     setBusy(true);
     await onDone(cls, grp);
     setBusy(false);
   };
+
+  const slotCount = CLASSES.find((c) => c.id === cls)?.slots ?? 4;
+  const slots = Array.from({ length: slotCount }, (_, i) => i + 1);
+
   return (
     <section className="setup">
       <div className="eyebrow">SETUP</div>
@@ -238,17 +259,22 @@ function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) 
         <div className="pl">クラス</div>
         <div className="grid">
           {CLASSES.map((c) => (
-            <button key={c.id} className={cls === c.id ? "sel" : ""} onClick={() => { setCls(c.id); setGrp(null); }}>{c.label}</button>
+            <button key={c.id} className={cls === c.id ? "sel" : ""} onClick={() => handleSelectClass(c.id)}>{c.label}</button>
           ))}
         </div>
       </div>
       <div className="pick">
         <div className="pl">班</div>
         <div className="grid">
-          {Array.from({ length: CLASSES.find((c) => c.id === cls)?.slots ?? 4 }, (_, i) => i + 1).map((g) => (
-            <button key={g} className={grp === g ? "sel" : ""} onClick={() => setGrp(g)}>第{g}班</button>
-          ))}
           {!cls && <span style={{ fontSize: 12, color: "var(--muted)", padding: "10px 4px" }}>先にクラスを選んでください</span>}
+          {cls && teamsLoading && <span style={{ fontSize: 12, color: "var(--muted)", padding: "10px 4px" }}>読み込み中…</span>}
+          {cls && !teamsLoading && slots.map((g) => {
+            const team = fetchedTeams.find((t) => t.slot === g);
+            const label = team?.name ?? `第${g}班`;
+            return (
+              <button key={g} className={grp === g ? "sel" : ""} onClick={() => setGrp(g)}>{label}</button>
+            );
+          })}
         </div>
       </div>
       <button className="primary" disabled={!cls || !grp || busy} onClick={go}>
