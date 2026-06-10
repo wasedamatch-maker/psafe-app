@@ -4,7 +4,6 @@ export const CLASSES = [
   { id: 2, label: "あっこさんクラス",   slots: 4 },
   { id: 3, label: "やまひでさんクラス", slots: 4 },
   { id: 4, label: "みやさんクラス",     slots: 4 },
-  { id: 5, label: "テスト",             slots: 1 },
 ];
 
 export const classLabel = (id: number | null) =>
