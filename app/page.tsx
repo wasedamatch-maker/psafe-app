@@ -14,14 +14,7 @@ import {
 } from "@/lib/psafe";
 import type { MyResponse, Spread, Team } from "@/lib/psafe";
 
-// クラス名とグループ数の定義（DBのclass_id 1〜4に対応）
-const CLASSES = [
-  { id: 1, label: "みずほさんクラス", slots: 3 },
-  { id: 2, label: "あっこさんクラス",  slots: 4 },
-  { id: 3, label: "やまひでさんクラス", slots: 4 },
-  { id: 4, label: "みやさんクラス",   slots: 4 },
-];
-const classLabel = (id: number | null) => CLASSES.find((c) => c.id === id)?.label ?? `クラス${id}`;
+import { CLASSES, classLabel } from "@/lib/constants";
 
 const ITEMS = [
   { key: "ミス",     text: "ミスをしても、責められたり不利に扱われたりしない" },
@@ -173,7 +166,7 @@ export default function App() {
             }}>変更</button>
           </div>
         </div>
-        <h1>いまの感じ方を、<span className="zero">0</span> に置く</h1>
+        <h1>あなたの感覚に合わせてスライドしてみよう！</h1>
         <p className="lede">「どちらでもない」を基準（0）として、班での「今」の感じ方を左右に置きます。点数ではなく、変化を測るためのもの。<b>数値は誰にも見えません。</b></p>
       </header>
 
