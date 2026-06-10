@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
-import { PenLine, Activity, Share2, Check, Copy, ChevronRight, Pencil } from "lucide-react";
+import { PenLine, Activity, Share2, Check, Copy, ChevronRight } from "lucide-react";
 import {
   ensureAnonSession,
   getMyTeam,
@@ -10,7 +10,6 @@ import {
   getMyResponses,
   getTeamItemSpread,
   getTeamSpreadTimeline,
-  updateTeamName,
 } from "@/lib/psafe";
 import type { MyResponse, Spread, Team } from "@/lib/psafe";
 
@@ -115,18 +114,6 @@ export default function App() {
     }
   };
 
-  const handleNameUpdate = async (name: string) => {
-    if (!teamId) return;
-    try {
-      await updateTeamName(teamId, name);
-      setTeamName(name.trim() || null);
-      flash("チーム名を更新しました");
-    } catch (e) {
-      console.error(e);
-      const msg = e instanceof Error ? e.message : String(e);
-      flash("失敗: " + msg);
-    }
-  };
 
   const refreshShare = async () => {
     if (!teamId) return;
@@ -156,12 +143,9 @@ export default function App() {
         <div className="topbar">
           <span className="eyebrow">EDMONDSON · 7 ITEMS</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <TeamNameBadge
-              slot={teamSlot}
-              classId={classId}
-              name={teamName}
-              onUpdate={handleNameUpdate}
-            />
+            <span className="ctx" style={{ cursor: "default" }}>
+              {teamName ?? `${classLabel(classId)} · 第${teamSlot}班`}
+            </span>
             <button className="ctx" onClick={() => {
               setTeamId(null); setTeamSlot(null); setClassId(null); setTeamName(null);
             }}>変更</button>
@@ -192,33 +176,6 @@ export default function App() {
   );
 }
 
-function TeamNameBadge({ slot, classId, name, onUpdate }: {
-  slot: number | null; classId: number | null; name: string | null; onUpdate: (n: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(name ?? "");
-  const label = name ? name : `${classLabel(classId)} · 第${slot}班`;
-  if (editing) {
-    return (
-      <span style={{ display: "flex", gap: 4 }}>
-        <input
-          autoFocus
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          style={{ border: "1px solid var(--line)", borderRadius: 6, padding: "3px 8px", fontSize: 12, fontFamily: "var(--sans)" }}
-          placeholder="チーム名（任意）"
-        />
-        <button className="ctx" onClick={() => { onUpdate(val); setEditing(false); }}>保存</button>
-        <button className="ctx" onClick={() => setEditing(false)}>✕</button>
-      </span>
-    );
-  }
-  return (
-    <button className="ctx" onClick={() => { setVal(name ?? ""); setEditing(true); }}>
-      {label} <Pencil size={11} style={{ marginLeft: 4, opacity: 0.5 }} />
-    </button>
-  );
-}
 
 function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) {
   const [cls, setCls] = useState<number | null>(null);
