@@ -357,6 +357,7 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
   const [val, setVal] = useState(value);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
 
   // 親から value が変わったら同期
   React.useEffect(() => { if (!editing) setVal(value); }, [value, editing]);
@@ -369,7 +370,10 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
       setTimeout(() => setFlash(false), 1200);
     } catch (e) {
       console.error(e);
-      alert("保存に失敗しました");
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrMsg(msg);
+      setSaving(false);
+      return; // editingのままにして入力を維持
     }
     setSaving(false);
     setEditing(false);
@@ -377,19 +381,22 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
 
   if (editing) {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <input
-          autoFocus
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-          placeholder={placeholder ?? ""}
-          style={{ border: "1px solid var(--line)", borderRadius: 6, padding: "3px 8px", fontSize: 13, fontFamily: "var(--sans)", minWidth: 120 }}
-        />
-        <button style={{ ...S.ghostBtn, padding: "3px 10px", fontSize: 12 }} disabled={saving} onClick={save}>
-          {saving ? "…" : "保存"}
-        </button>
-        <button style={{ ...S.ghostBtn, padding: "3px 8px", fontSize: 12 }} onClick={() => setEditing(false)}>✕</button>
+      <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input
+            autoFocus
+            value={val}
+            onChange={(e) => { setVal(e.target.value); setErrMsg(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+            placeholder={placeholder ?? ""}
+            style={{ border: `1px solid ${errMsg ? "#B0814F" : "var(--line)"}`, borderRadius: 6, padding: "3px 8px", fontSize: 13, fontFamily: "var(--sans)", minWidth: 120 }}
+          />
+          <button style={{ ...S.ghostBtn, padding: "3px 10px", fontSize: 12 }} disabled={saving} onClick={save}>
+            {saving ? "…" : "保存"}
+          </button>
+          <button style={{ ...S.ghostBtn, padding: "3px 8px", fontSize: 12 }} onClick={() => { setEditing(false); setErrMsg(""); }}>✕</button>
+        </span>
+        {errMsg && <span style={{ fontSize: 11, color: "#B0814F" }}>⚠ {errMsg}</span>}
       </span>
     );
   }
