@@ -97,9 +97,11 @@ export async function getClassSpreadTimeline(classId: number): Promise<Spread[]>
   return data as Spread[];
 }
 
-// ── チーム名（後から決まる。所属メンバーのみ更新可：RLS）────────────
+// ── チーム名（SECURITY DEFINER 関数経由で更新）────────────────────
 export async function updateTeamName(teamId: string, name: string) {
-  const { error } = await supabase
-    .from("teams").update({ name: name.trim() || null }).eq("id", teamId);
+  const { error } = await supabase.rpc("admin_update_team_name", {
+    p_team_id: teamId,
+    p_name: name.trim() || null,
+  });
   if (error) throw error;
 }
