@@ -123,7 +123,8 @@ export default function App() {
       flash("チーム名を更新しました");
     } catch (e) {
       console.error(e);
-      flash("チーム名の更新に失敗しました");
+      const msg = e instanceof Error ? e.message : String(e);
+      flash("失敗: " + msg);
     }
   };
 
