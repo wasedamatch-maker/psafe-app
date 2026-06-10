@@ -1,10 +1,10 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { BarChart2, Users, RefreshCw, Trash2, ChevronDown, ChevronUp, Lock, LogOut, AlertTriangle } from "lucide-react";
+import { BarChart2, Users, RefreshCw, ChevronDown, ChevronUp, Lock, LogOut, AlertTriangle, Pencil } from "lucide-react";
 import { ensureAnonSession } from "@/lib/psafe";
 import { getTeamSpreadTimeline, getTeamItemSpread } from "@/lib/psafe";
 import type { Spread } from "@/lib/psafe";
-import { adminGetTeamStats, adminResetSemester } from "@/lib/adminPsafe";
+import { adminGetTeamStats, adminResetSemester, adminUpdateClassLabel, adminUpdateTeamName } from "@/lib/adminPsafe";
 import type { TeamStat } from "@/lib/adminPsafe";
 import { CLASSES, classLabel } from "@/lib/constants";
 
@@ -26,6 +26,9 @@ export default function AdminPage() {
   const [resetPw, setResetPw] = useState("");
   const [resetMsg, setResetMsg] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+  // ローカルで編集中のクラスラベル・チーム名を管理
+  const [classLabels, setClassLabels] = useState<Record<number, string>>({});
+  const [teamNames, setTeamNames] = useState<Record<string, string | null>>({});
 
   const login = () => {
     if (pwInput === ADMIN_PASSWORD) {
@@ -42,6 +45,10 @@ export default function AdminPage() {
       await ensureAnonSession();
       const s = await adminGetTeamStats();
       setStats(s);
+      // チーム名のローカル状態を初期化
+      const names: Record<string, string | null> = {};
+      s.forEach((t) => { names[t.team_id] = t.name; });
+      setTeamNames(names);
     } catch (e) {
       console.error(e);
     }
@@ -146,7 +153,14 @@ export default function AdminPage() {
       {loading ? <p style={S.muted}>読み込み中…</p> : byClass.map(({ cls, teams }) => (
         <div key={cls.id} style={S.classBlock}>
           <div style={S.classHeader}>
-            <span style={S.classLabel}>{cls.label}</span>
+            <InlineEdit
+              value={classLabels[cls.id] ?? cls.label}
+              labelStyle={S.classLabel}
+              onSave={async (val) => {
+                await adminUpdateClassLabel(cls.id, val);
+                setClassLabels((prev) => ({ ...prev, [cls.id]: val }));
+              }}
+            />
             <span style={S.classSub}>{teams.reduce((s, t) => s + Number(t.member_count), 0)}人 / {teams.reduce((s, t) => s + Number(t.response_count), 0)}件</span>
           </div>
           <table style={S.table}>
@@ -164,7 +178,16 @@ export default function AdminPage() {
                 <React.Fragment key={t.team_id}>
                   <tr style={S.tr}>
                     <td style={S.td}>第{t.slot}班</td>
-                    <td style={S.td}>{t.name ?? <span style={{ color: "var(--muted)", fontStyle: "italic" }}>未設定</span>}</td>
+                    <td style={S.td}>
+                      <InlineEdit
+                        value={teamNames[t.team_id] ?? ""}
+                        placeholder="未設定"
+                        onSave={async (val) => {
+                          await adminUpdateTeamName(t.team_id, val);
+                          setTeamNames((prev) => ({ ...prev, [t.team_id]: val || null }));
+                        }}
+                      />
+                    </td>
                     <td style={{ ...S.td, textAlign: "center" }}>{Number(t.member_count)}</td>
                     <td style={{ ...S.td, textAlign: "center" }}>{Number(t.response_count)}</td>
                     <td style={{ ...S.td, textAlign: "center" }}>
@@ -320,6 +343,67 @@ function MiniSpreadChart({ timeline }: { timeline: Spread[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── インライン編集コンポーネント ─────────────────────────────────
+function InlineEdit({ value, placeholder, labelStyle, onSave }: {
+  value: string;
+  placeholder?: string;
+  labelStyle?: React.CSSProperties;
+  onSave: (val: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState(false);
+
+  // 親から value が変わったら同期
+  React.useEffect(() => { if (!editing) setVal(value); }, [value, editing]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(val);
+      setFlash(true);
+      setTimeout(() => setFlash(false), 1200);
+    } catch (e) {
+      console.error(e);
+      alert("保存に失敗しました");
+    }
+    setSaving(false);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <input
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+          placeholder={placeholder ?? ""}
+          style={{ border: "1px solid var(--line)", borderRadius: 6, padding: "3px 8px", fontSize: 13, fontFamily: "var(--sans)", minWidth: 120 }}
+        />
+        <button style={{ ...S.ghostBtn, padding: "3px 10px", fontSize: 12 }} disabled={saving} onClick={save}>
+          {saving ? "…" : "保存"}
+        </button>
+        <button style={{ ...S.ghostBtn, padding: "3px 8px", fontSize: 12 }} onClick={() => setEditing(false)}>✕</button>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", ...labelStyle }}
+      onClick={() => setEditing(true)}
+      title="クリックして編集"
+    >
+      {value || <span style={{ color: "var(--muted)", fontStyle: "italic", fontWeight: "normal" }}>{placeholder ?? "未設定"}</span>}
+      <Pencil size={11} style={{ color: "var(--muted)", opacity: flash ? 0 : 0.5, flexShrink: 0 }} />
+      {flash && <span style={{ fontSize: 11, color: "var(--up)" }}>✓</span>}
+    </span>
   );
 }
 
