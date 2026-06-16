@@ -11,11 +11,26 @@ export type TeamStat = {
   response_count: number;
 };
 
+export type WeeklySubmission = {
+  week: string;          // その週の月曜日（YYYY-MM-DD）
+  team_id: string;
+  class_id: number;
+  slot: number;
+  submitter_count: number; // その週に提出した人数（重複なし）
+};
+
 /** 全クラス・全チームの参加者数と記録数を取得 */
 export async function adminGetTeamStats(): Promise<TeamStat[]> {
   const { data, error } = await supabase.rpc("admin_team_stats");
   if (error) throw error;
   return data as TeamStat[];
+}
+
+/** 週ごと・班ごとの提出人数（誰が提出したかではなく、何人提出したか） */
+export async function adminGetWeeklySubmissions(): Promise<WeeklySubmission[]> {
+  const { data, error } = await supabase.rpc("admin_weekly_submissions");
+  if (error) throw error;
+  return data as WeeklySubmission[];
 }
 
 /** クラス名の変更 */

@@ -1,23 +1,18 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { BarChart2, Users, RefreshCw, ChevronDown, ChevronUp, Lock, LogOut, AlertTriangle, Pencil } from "lucide-react";
+import { BarChart2, Users, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Pencil, CalendarCheck } from "lucide-react";
 import { ensureAnonSession } from "@/lib/psafe";
 import { getTeamSpreadTimeline, getTeamItemSpread } from "@/lib/psafe";
 import type { Spread } from "@/lib/psafe";
-import { adminGetTeamStats, adminResetSemester, adminUpdateClassLabel, adminUpdateTeamName } from "@/lib/adminPsafe";
-import type { TeamStat } from "@/lib/adminPsafe";
-import { CLASSES, classLabel } from "@/lib/constants";
-
-// 管理者パスワード（Vercelの環境変数 NEXT_PUBLIC_ADMIN_PASSWORD で上書き可）
-const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? "psafe2025";
+import { adminGetTeamStats, adminGetWeeklySubmissions, adminResetSemester, adminUpdateClassLabel, adminUpdateTeamName } from "@/lib/adminPsafe";
+import type { TeamStat, WeeklySubmission } from "@/lib/adminPsafe";
+import { CLASSES } from "@/lib/constants";
 
 const ITEMS = ["ミス", "問題提起", "異質性", "リスク", "援助要請", "妨害なし", "強み"];
 
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
-  const [pwInput, setPwInput] = useState("");
-  const [pwError, setPwError] = useState("");
   const [stats, setStats] = useState<TeamStat[]>([]);
+  const [weekly, setWeekly] = useState<WeeklySubmission[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<{ timeline: Spread[]; items: Spread[] } | null>(null);
@@ -30,21 +25,16 @@ export default function AdminPage() {
   const [classLabels, setClassLabels] = useState<Record<number, string>>({});
   const [teamNames, setTeamNames] = useState<Record<string, string | null>>({});
 
-  const login = () => {
-    if (pwInput === ADMIN_PASSWORD) {
-      setAuthed(true);
-      loadStats();
-    } else {
-      setPwError("パスワードが違います");
-    }
-  };
-
   const loadStats = async () => {
     setLoading(true);
     try {
       await ensureAnonSession();
-      const s = await adminGetTeamStats();
+      const [s, w] = await Promise.all([
+        adminGetTeamStats(),
+        adminGetWeeklySubmissions(),
+      ]);
       setStats(s);
+      setWeekly(w);
       // チーム名のローカル状態を初期化
       const names: Record<string, string | null> = {};
       s.forEach((t) => { names[t.team_id] = t.name; });
@@ -54,6 +44,9 @@ export default function AdminPage() {
     }
     setLoading(false);
   };
+
+  // 画面を開いたら自動でデータ読み込み
+  useEffect(() => { loadStats(); }, []);
 
   const toggleTeam = async (teamId: string) => {
     if (expandedTeam === teamId) {
@@ -100,30 +93,6 @@ export default function AdminPage() {
   const totalMembers = stats.reduce((s, t) => s + Number(t.member_count), 0);
   const totalResponses = stats.reduce((s, t) => s + Number(t.response_count), 0);
 
-  if (!authed) {
-    return (
-      <div style={S.root}>
-        <style>{CSS}</style>
-        <div style={S.loginBox}>
-          <Lock size={28} color="#7A828E" />
-          <h2 style={S.loginTitle}>運営管理画面</h2>
-          <p style={S.loginSub}>心理的安全性トラッカー</p>
-          <input
-            type="password"
-            value={pwInput}
-            onChange={(e) => { setPwInput(e.target.value); setPwError(""); }}
-            onKeyDown={(e) => e.key === "Enter" && login()}
-            placeholder="管理者パスワード"
-            style={S.input}
-            autoFocus
-          />
-          {pwError && <p style={S.errMsg}>{pwError}</p>}
-          <button style={S.btn} onClick={login}>ログイン</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={S.root}>
       <style>{CSS}</style>
@@ -136,7 +105,6 @@ export default function AdminPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={S.ghostBtn} onClick={loadStats}><RefreshCw size={14} /> 更新</button>
-          <button style={S.ghostBtn} onClick={() => setAuthed(false)}><LogOut size={14} /> ログアウト</button>
         </div>
       </div>
 
@@ -217,6 +185,26 @@ export default function AdminPage() {
         </div>
       ))}
 
+      {/* 週ごとの提出状況 */}
+      <h2 style={{ ...S.h2, marginTop: 40, display: "flex", alignItems: "center", gap: 7 }}>
+        <CalendarCheck size={18} color="#3a414c" /> 週ごとの提出状況
+      </h2>
+      <p style={{ ...S.muted, marginTop: -6, marginBottom: 12 }}>
+        各回（水曜の授業日）に、班の何人が記録したかを表示します。<br />
+        セルの数字＝提出人数／その班の参加者数。色が濃いほど提出率が高い回です。
+      </p>
+      {loading ? <p style={S.muted}>読み込み中…</p> : weekly.length === 0 ? (
+        <p style={S.muted}>まだ記録がありません。</p>
+      ) : byClass.map(({ cls, teams }) => (
+        <WeeklyMatrix
+          key={cls.id}
+          classLabel={classLabels[cls.id] ?? cls.label}
+          teams={teams}
+          teamNames={teamNames}
+          weekly={weekly.filter((w) => w.class_id === cls.id)}
+        />
+      ))}
+
       {/* 学期リセット */}
       <h2 style={{ ...S.h2, marginTop: 40 }}>学期リセット</h2>
       <div style={S.dangerBox}>
@@ -262,7 +250,7 @@ export default function AdminPage() {
       </div>
 
       <p style={{ ...S.muted, textAlign: "center", marginTop: 32, fontSize: 11 }}>
-        管理画面URL: /admin　　デフォルトPW: psafe2025（Vercel環境変数 NEXT_PUBLIC_ADMIN_PASSWORD で変更可）
+        管理画面URL: /admin（パスワード不要・URLを知っている人だけアクセスできます）
       </p>
     </div>
   );
@@ -413,6 +401,77 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
       <Pencil size={11} style={{ color: "var(--muted)", opacity: flash ? 0 : 0.5, flexShrink: 0 }} />
       {flash && <span style={{ fontSize: 11, color: "var(--up)" }}>✓</span>}
     </span>
+  );
+}
+
+// ── 週ごとの提出マトリクス（クラス1つ分）─────────────────────────
+function WeeklyMatrix({ classLabel, teams, teamNames, weekly }: {
+  classLabel: string;
+  teams: TeamStat[];
+  teamNames: Record<string, string | null>;
+  weekly: WeeklySubmission[];
+}) {
+  // 週（月曜日）の一覧を昇順で
+  const weeks = Array.from(new Set(weekly.map((w) => w.week))).sort();
+  // 「team_id|week」→ 提出人数 の参照表
+  const cell: Record<string, number> = {};
+  weekly.forEach((w) => { cell[`${w.team_id}|${w.week}`] = Number(w.submitter_count); });
+
+  // 月曜日 → 水曜日（授業日）の表示文字列
+  const wedLabel = (monday: string) => {
+    const d = new Date(monday + "T00:00:00");
+    d.setDate(d.getDate() + 2); // 水曜
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  if (weeks.length === 0) {
+    return (
+      <div style={{ marginBottom: 18 }}>
+        <p style={S.classLabel}>{classLabel}</p>
+        <p style={{ ...S.muted, marginTop: 4 }}>まだ記録がありません。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <p style={{ ...S.classLabel, marginBottom: 6 }}>{classLabel}</p>
+      <div style={{ overflowX: "auto" }}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={{ ...S.th, position: "sticky", left: 0, background: "#f3f4f7" }}>授業日</th>
+              {teams.map((t) => (
+                <th key={t.team_id} style={{ ...S.th, textAlign: "center", whiteSpace: "nowrap" }}>
+                  {teamNames[t.team_id] || `第${t.slot}班`}
+                  <div style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>{Number(t.member_count)}人</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {weeks.map((wk) => (
+              <tr key={wk} style={S.tr}>
+                <td style={{ ...S.td, fontWeight: 700, whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--surface)" }}>
+                  {wedLabel(wk)}
+                </td>
+                {teams.map((t) => {
+                  const count = cell[`${t.team_id}|${wk}`] ?? 0;
+                  const total = Number(t.member_count);
+                  const ratio = total > 0 ? count / total : 0;
+                  const bg = count === 0 ? "transparent" : `rgba(60, 123, 139, ${0.12 + ratio * 0.5})`;
+                  return (
+                    <td key={t.team_id} style={{ ...S.td, textAlign: "center", background: bg, fontFamily: "monospace" }}>
+                      {count === 0 ? <span style={{ color: "var(--muted)" }}>—</span> : <><b>{count}</b><span style={{ color: "var(--muted)", fontSize: 11 }}>/{total}</span></>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
