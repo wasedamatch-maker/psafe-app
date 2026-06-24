@@ -273,7 +273,8 @@ function RecordView({ draft, setDraft, memo, setMemo, onSave, saving, chkTransla
   return (
     <section className="card">
       <div className="checklist">
-        <p className="cl-title">⚠ 記録する前に、2つの確認をお願いします</p>
+        <p className="cl-title">⚠ 記録する前に、下の2つに必ずチェックしてください</p>
+        <p className="cl-required">※ 両方にチェックしないと記録できません（必須）</p>
         <label className="cl-item">
           <input type="checkbox" checked={chkTranslate} disabled={saving} onChange={(e) => setChkTranslate(e.target.checked)} />
           <span>ブラウザの<b>翻訳機能はオフ</b>になっていますか？（Chromeなどの自動翻訳がオンだと、正しく動作しないことがあります）</span>
@@ -294,7 +295,7 @@ function RecordView({ draft, setDraft, memo, setMemo, onSave, saving, chkTransla
         {saving ? "記録しています… そのままお待ちください" : "この回を記録する"}
       </button>
       {!saving && (!chkTranslate || !chkDevice) && (
-        <p className="note" style={{ textAlign: "center" }}>上の2つの確認にチェックすると、ボタンが押せるようになります。</p>
+        <p className="note cl-warn" style={{ textAlign: "center" }}>上の2つの確認にチェックすると、ボタンが押せるようになります。</p>
       )}
     </section>
   );
@@ -504,11 +505,13 @@ const CSS = `
 .tabs button{display:flex;align-items:center;gap:6px;background:none;border:0;padding:9px 12px;font-family:var(--sans);font-size:13.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--origin);font-weight:700}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 20px;box-shadow:0 1px 2px rgba(30,34,42,.04)}
-.checklist{background:#fbf3e6;border:1px solid #e6c79b;border-radius:11px;padding:14px 15px;margin-bottom:22px}
-.cl-title{font-size:13px;font-weight:700;color:#7a4f16;margin:0 0 10px}
-.cl-item{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#5e451f;line-height:1.6;cursor:pointer;padding:5px 0}
-.cl-item input[type=checkbox]{margin-top:2px;width:17px;height:17px;flex:none;accent-color:#B0814F;cursor:pointer}
-.cl-item b{color:#7a4f16}
+.checklist{background:#fdecec;border:1px solid #e6a9a9;border-radius:11px;padding:14px 15px;margin-bottom:22px}
+.cl-title{font-size:13px;font-weight:800;color:#c0271b;margin:0 0 4px}
+.cl-required{font-size:11.5px;font-weight:700;color:#c0271b;margin:0 0 10px}
+.cl-item{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#5e2b27;line-height:1.6;cursor:pointer;padding:5px 0}
+.cl-item input[type=checkbox]{margin-top:2px;width:17px;height:17px;flex:none;accent-color:#c0271b;cursor:pointer}
+.cl-item b{color:#c0271b}
+.cl-warn{color:#c0271b!important;font-weight:700}
 .axes{display:flex;flex-direction:column;gap:21px}
 .axis-head{font-size:14px;font-weight:600;display:flex;gap:9px;align-items:baseline;margin-bottom:11px}
 .axis-head .num{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:500;flex:none}

@@ -135,7 +135,7 @@ export default function AdminPage() {
             <span style={S.classSub}>{teams.reduce((s, t) => s + Number(t.member_count), 0)}人 / {teams.reduce((s, t) => s + Number(t.response_count), 0)}件</span>
           </div>
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-          <table style={{ ...S.table, minWidth: 480 }}>
+          <table style={S.table}>
             <thead>
               <tr>
                 <th style={S.th}>班</th>
@@ -462,7 +462,7 @@ function BalanceMatrix({ classLabel, teams, teamNames, balance }: {
     <div style={{ marginBottom: 22 }}>
       <p style={{ ...S.classLabel, marginBottom: 6 }}>{classLabel}</p>
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        <table style={{ ...S.table, minWidth: 540 }}>
+        <table style={S.table}>
           <thead>
             <tr>
               <th style={S.th}>班</th>
@@ -562,7 +562,7 @@ function WeeklyMatrix({ classLabel, teams, teamNames, weekly }: {
   return (
     <div style={{ marginBottom: 22 }}>
       <p style={{ ...S.classLabel, marginBottom: 6 }}>{classLabel}</p>
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <table style={S.table}>
           <thead>
             <tr>
@@ -632,7 +632,7 @@ const S: Record<string, React.CSSProperties> = {
   classHeader: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 },
   classLabel: { fontWeight: 700, fontSize: 15, color: "var(--ink)" },
   classSub: { fontSize: 12, color: "var(--muted)" },
-  table: { width: "100%", borderCollapse: "collapse", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" },
+  table: { width: "max-content", minWidth: "100%", borderCollapse: "collapse", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" },
   th: { textAlign: "left" as const, fontSize: 12, fontWeight: 700, color: "var(--muted)", padding: "9px 12px", background: "#f3f4f7", borderBottom: "1px solid var(--line)" },
   td: { fontSize: 13, padding: "10px 12px", borderBottom: "1px solid var(--line)" },
   tr: { background: "var(--surface)" },
