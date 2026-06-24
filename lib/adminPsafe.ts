@@ -19,6 +19,17 @@ export type WeeklySubmission = {
   submitter_count: number; // その週に提出した人数（重複なし）
 };
 
+export type TeamBalance = {
+  team_id: string;
+  class_id: number;
+  slot: number;
+  pos_sum: number;        // プラス側の値の合計
+  neg_sum: number;        // マイナス側の値の合計（負の数）
+  total_sum: number;      // 差引合計（pos_sum + neg_sum）
+  value_count: number;    // 集計対象の数値の個数（記録数×7）
+  response_count: number; // 記録数
+};
+
 /** 全クラス・全チームの参加者数と記録数を取得 */
 export async function adminGetTeamStats(): Promise<TeamStat[]> {
   const { data, error } = await supabase.rpc("admin_team_stats");
@@ -31,6 +42,13 @@ export async function adminGetWeeklySubmissions(): Promise<WeeklySubmission[]> {
   const { data, error } = await supabase.rpc("admin_weekly_submissions");
   if (error) throw error;
   return data as WeeklySubmission[];
+}
+
+/** 班ごとの数値の偏り（プラス側合計・マイナス側合計・差引合計） */
+export async function adminGetTeamBalance(): Promise<TeamBalance[]> {
+  const { data, error } = await supabase.rpc("admin_team_score_balance");
+  if (error) throw error;
+  return data as TeamBalance[];
 }
 
 /** クラス名の変更 */

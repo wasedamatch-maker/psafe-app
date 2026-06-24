@@ -1,11 +1,11 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { BarChart2, Users, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Pencil, CalendarCheck } from "lucide-react";
+import { BarChart2, Users, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Pencil, CalendarCheck, Scale } from "lucide-react";
 import { ensureAnonSession } from "@/lib/psafe";
 import { getTeamSpreadTimeline, getTeamItemSpread } from "@/lib/psafe";
 import type { Spread } from "@/lib/psafe";
-import { adminGetTeamStats, adminGetWeeklySubmissions, adminResetSemester, adminUpdateClassLabel, adminUpdateTeamName } from "@/lib/adminPsafe";
-import type { TeamStat, WeeklySubmission } from "@/lib/adminPsafe";
+import { adminGetTeamStats, adminGetWeeklySubmissions, adminGetTeamBalance, adminResetSemester, adminUpdateClassLabel, adminUpdateTeamName } from "@/lib/adminPsafe";
+import type { TeamStat, WeeklySubmission, TeamBalance } from "@/lib/adminPsafe";
 import { CLASSES } from "@/lib/constants";
 
 const ITEMS = ["ミス", "問題提起", "異質性", "リスク", "援助要請", "妨害なし", "強み"];
@@ -13,6 +13,7 @@ const ITEMS = ["ミス", "問題提起", "異質性", "リスク", "援助要請
 export default function AdminPage() {
   const [stats, setStats] = useState<TeamStat[]>([]);
   const [weekly, setWeekly] = useState<WeeklySubmission[]>([]);
+  const [balance, setBalance] = useState<TeamBalance[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<{ timeline: Spread[]; items: Spread[] } | null>(null);
@@ -29,12 +30,14 @@ export default function AdminPage() {
     setLoading(true);
     try {
       await ensureAnonSession();
-      const [s, w] = await Promise.all([
+      const [s, w, b] = await Promise.all([
         adminGetTeamStats(),
         adminGetWeeklySubmissions(),
+        adminGetTeamBalance(),
       ]);
       setStats(s);
       setWeekly(w);
+      setBalance(b);
       // チーム名のローカル状態を初期化
       const names: Record<string, string | null> = {};
       s.forEach((t) => { names[t.team_id] = t.name; });
@@ -131,7 +134,8 @@ export default function AdminPage() {
             />
             <span style={S.classSub}>{teams.reduce((s, t) => s + Number(t.member_count), 0)}人 / {teams.reduce((s, t) => s + Number(t.response_count), 0)}件</span>
           </div>
-          <table style={S.table}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table style={{ ...S.table, minWidth: 480 }}>
             <thead>
               <tr>
                 <th style={S.th}>班</th>
@@ -182,7 +186,28 @@ export default function AdminPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
+      ))}
+
+      {/* グループごとの数値の偏り */}
+      <h2 style={{ ...S.h2, marginTop: 40, display: "flex", alignItems: "center", gap: 7 }}>
+        <Scale size={18} color="#3a414c" /> グループごとの数値の偏り
+      </h2>
+      <p style={{ ...S.muted, marginTop: -6, marginBottom: 12 }}>
+        各班で記録された値を「プラス側（そう思う）」と「マイナス側（そう思わない）」に分けて合計したものです。<br />
+        差引合計がプラスなら全体的にポジティブ、マイナスならネガティブ寄りの傾向を表します。
+      </p>
+      {loading ? <p style={S.muted}>読み込み中…</p> : balance.every((b) => Number(b.value_count) === 0) ? (
+        <p style={S.muted}>まだ記録がありません。</p>
+      ) : byClass.map(({ cls, teams }) => (
+        <BalanceMatrix
+          key={cls.id}
+          classLabel={classLabels[cls.id] ?? cls.label}
+          teams={teams}
+          teamNames={teamNames}
+          balance={balance.filter((b) => b.class_id === cls.id)}
+        />
       ))}
 
       {/* 週ごとの提出状況 */}
@@ -401,6 +426,107 @@ function InlineEdit({ value, placeholder, labelStyle, onSave }: {
       <Pencil size={11} style={{ color: "var(--muted)", opacity: flash ? 0 : 0.5, flexShrink: 0 }} />
       {flash && <span style={{ fontSize: 11, color: "var(--up)" }}>✓</span>}
     </span>
+  );
+}
+
+// ── グループごとの数値の偏り（クラス1つ分）───────────────────────
+function BalanceMatrix({ classLabel, teams, teamNames, balance }: {
+  classLabel: string;
+  teams: TeamStat[];
+  teamNames: Record<string, string | null>;
+  balance: TeamBalance[];
+}) {
+  const byTeam: Record<string, TeamBalance> = {};
+  balance.forEach((b) => { byTeam[b.team_id] = b; });
+
+  // 全班でのプラス側・マイナス側の最大絶対値（バーの正規化用）
+  const maxAbs = Math.max(
+    1,
+    ...teams.map((t) => {
+      const b = byTeam[t.team_id];
+      return b ? Math.max(Number(b.pos_sum), Math.abs(Number(b.neg_sum))) : 0;
+    })
+  );
+
+  const hasAny = teams.some((t) => byTeam[t.team_id] && Number(byTeam[t.team_id].value_count) > 0);
+  if (!hasAny) {
+    return (
+      <div style={{ marginBottom: 18 }}>
+        <p style={S.classLabel}>{classLabel}</p>
+        <p style={{ ...S.muted, marginTop: 4 }}>まだ記録がありません。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <p style={{ ...S.classLabel, marginBottom: 6 }}>{classLabel}</p>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table style={{ ...S.table, minWidth: 540 }}>
+          <thead>
+            <tr>
+              <th style={S.th}>班</th>
+              <th style={{ ...S.th, minWidth: 150 }}>偏り（マイナス ← → プラス）</th>
+              <th style={{ ...S.th, textAlign: "right" }}>マイナス計</th>
+              <th style={{ ...S.th, textAlign: "right" }}>プラス計</th>
+              <th style={{ ...S.th, textAlign: "right" }}>差引合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            {teams.map((t) => {
+              const b = byTeam[t.team_id];
+              const pos = b ? Number(b.pos_sum) : 0;
+              const neg = b ? Number(b.neg_sum) : 0;   // 負の数
+              const total = b ? Number(b.total_sum) : 0;
+              const name = teamNames[t.team_id] || `第${t.slot}班`;
+              return (
+                <tr key={t.team_id} style={S.tr}>
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }}>{name}</td>
+                  <td style={S.td}>
+                    <DivergingBar pos={pos} neg={neg} maxAbs={maxAbs} />
+                  </td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", color: "#B0814F" }}>{neg}</td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", color: "#3C7B8B" }}>+{pos}</td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: total > 0 ? "#3C7B8B" : total < 0 ? "#B0814F" : "var(--muted)" }}>
+                    {total > 0 ? "+" : ""}{total}
+                  </td>
+                </tr>
+              );
+            })}
+            {/* クラス合計 */}
+            {(() => {
+              const sumPos = teams.reduce((s, t) => s + (byTeam[t.team_id] ? Number(byTeam[t.team_id].pos_sum) : 0), 0);
+              const sumNeg = teams.reduce((s, t) => s + (byTeam[t.team_id] ? Number(byTeam[t.team_id].neg_sum) : 0), 0);
+              const sumTotal = sumPos + sumNeg;
+              return (
+                <tr style={{ background: "#f3f4f7" }}>
+                  <td style={{ ...S.td, fontWeight: 700, whiteSpace: "nowrap" }}>クラス合計</td>
+                  <td style={S.td}></td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#B0814F" }}>{sumNeg}</td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#3C7B8B" }}>+{sumPos}</td>
+                  <td style={{ ...S.td, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: sumTotal > 0 ? "#3C7B8B" : sumTotal < 0 ? "#B0814F" : "var(--muted)" }}>
+                    {sumTotal > 0 ? "+" : ""}{sumTotal}
+                  </td>
+                </tr>
+              );
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// 0を中心に、左＝マイナス側、右＝プラス側に伸びる横棒
+function DivergingBar({ pos, neg, maxAbs }: { pos: number; neg: number; maxAbs: number }) {
+  const posPct = (pos / maxAbs) * 50;
+  const negPct = (Math.abs(neg) / maxAbs) * 50;
+  return (
+    <div style={{ position: "relative", height: 12, background: "#eef0f3", borderRadius: 4, minWidth: 120 }}>
+      <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1.5, background: "var(--origin)", transform: "translateX(-50%)" }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, right: "50%", width: negPct + "%", background: "#B0814F", borderRadius: "4px 0 0 4px" }} />
+      <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", width: posPct + "%", background: "#3C7B8B", borderRadius: "0 4px 4px 0" }} />
+    </div>
   );
 }
 

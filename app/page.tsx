@@ -42,6 +42,9 @@ export default function App() {
   const [responses, setResponses] = useState<MyResponse[]>([]);
   const [itemSpread, setItemSpread] = useState<Spread[]>([]);
   const [timeline, setTimeline] = useState<Spread[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [chkTranslate, setChkTranslate] = useState(false);
+  const [chkDevice, setChkDevice] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -99,19 +102,34 @@ export default function App() {
   };
 
   const handleSave = async () => {
-    if (!teamId) return;
+    if (!teamId || saving) return;
+    if (!chkTranslate || !chkDevice) { flash("上の確認事項にチェックしてください"); return; }
+    // 二重送信防止：直前（90秒以内）に記録があれば止める
+    const lastAt = responses.length
+      ? Math.max(...responses.map((r) => new Date(r.recorded_at).getTime()))
+      : 0;
+    if (lastAt && Date.now() - lastAt < 90 * 1000) {
+      flash("先ほど記録したばかりです。少し時間をおいてください");
+      return;
+    }
+    setSaving(true);
+    // あえて2秒待つ：送信中だと分かるようにし、誤って何度も送るのを防ぐ
+    await new Promise((res) => setTimeout(res, 2000));
     try {
       await saveResponse(teamId, draft, memo);
       const r = await getMyResponses();
       setResponses(r);
       setDraft(ITEMS.map(() => 0));
       setMemo("");
+      setChkTranslate(false);
+      setChkDevice(false);
       flash("この回を記録しました");
       setView("self");
     } catch (e) {
       console.error(e);
       flash("保存に失敗しました");
     }
+    setSaving(false);
   };
 
 
@@ -162,7 +180,7 @@ export default function App() {
       </nav>
 
       <main>
-        {view === "record" ? <RecordView draft={draft} setDraft={setDraft} memo={memo} setMemo={setMemo} onSave={handleSave} />
+        {view === "record" ? <RecordView draft={draft} setDraft={setDraft} memo={memo} setMemo={setMemo} onSave={handleSave} saving={saving} chkTranslate={chkTranslate} setChkTranslate={setChkTranslate} chkDevice={chkDevice} setChkDevice={setChkDevice} />
           : view === "self" ? <SelfView sorted={sorted} overall={overall} />
           : <ShareView slot={teamSlot} itemSpread={itemSpread} timeline={timeline} />}
       </main>
@@ -243,13 +261,28 @@ function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) 
   );
 }
 
-function RecordView({ draft, setDraft, memo, setMemo, onSave }: {
+function RecordView({ draft, setDraft, memo, setMemo, onSave, saving, chkTranslate, setChkTranslate, chkDevice, setChkDevice }: {
   draft: number[]; setDraft: React.Dispatch<React.SetStateAction<number[]>>;
   memo: string; setMemo: React.Dispatch<React.SetStateAction<string>>; onSave: () => void;
+  saving: boolean;
+  chkTranslate: boolean; setChkTranslate: React.Dispatch<React.SetStateAction<boolean>>;
+  chkDevice: boolean; setChkDevice: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const set = (i: number, v: number) => setDraft((d) => d.map((x, k) => (k === i ? v : x)));
+  const ready = chkTranslate && chkDevice && !saving;
   return (
     <section className="card">
+      <div className="checklist">
+        <p className="cl-title">⚠ 記録する前に、2つの確認をお願いします</p>
+        <label className="cl-item">
+          <input type="checkbox" checked={chkTranslate} disabled={saving} onChange={(e) => setChkTranslate(e.target.checked)} />
+          <span>ブラウザの<b>翻訳機能はオフ</b>になっていますか？（Chromeなどの自動翻訳がオンだと、正しく動作しないことがあります）</span>
+        </label>
+        <label className="cl-item">
+          <input type="checkbox" checked={chkDevice} disabled={saving} onChange={(e) => setChkDevice(e.target.checked)} />
+          <span><b>前回と同じ端末・同じブラウザ</b>で開いていますか？（あなたの過去の記録を引き継ぐために必要です）</span>
+        </label>
+      </div>
       <div className="axes">
         {ITEMS.map((it, i) => <Axis key={it.key} n={i + 1} text={it.text} value={draft[i]} onChange={(v) => set(i, v)} />)}
       </div>
@@ -257,7 +290,12 @@ function RecordView({ draft, setDraft, memo, setMemo, onSave }: {
         <span>今日、班で何があった？<em>（任意・自分用のメモ）</em></span>
         <textarea rows={2} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="一行でいい。後で振り返るときの手がかりになります。" />
       </label>
-      <button className="primary" onClick={onSave}>この回を記録する</button>
+      <button className="primary" onClick={onSave} disabled={!ready}>
+        {saving ? "記録しています… そのままお待ちください" : "この回を記録する"}
+      </button>
+      {!saving && (!chkTranslate || !chkDevice) && (
+        <p className="note" style={{ textAlign: "center" }}>上の2つの確認にチェックすると、ボタンが押せるようになります。</p>
+      )}
     </section>
   );
 }
@@ -466,6 +504,11 @@ const CSS = `
 .tabs button{display:flex;align-items:center;gap:6px;background:none;border:0;padding:9px 12px;font-family:var(--sans);font-size:13.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--origin);font-weight:700}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 20px;box-shadow:0 1px 2px rgba(30,34,42,.04)}
+.checklist{background:#fbf3e6;border:1px solid #e6c79b;border-radius:11px;padding:14px 15px;margin-bottom:22px}
+.cl-title{font-size:13px;font-weight:700;color:#7a4f16;margin:0 0 10px}
+.cl-item{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#5e451f;line-height:1.6;cursor:pointer;padding:5px 0}
+.cl-item input[type=checkbox]{margin-top:2px;width:17px;height:17px;flex:none;accent-color:#B0814F;cursor:pointer}
+.cl-item b{color:#7a4f16}
 .axes{display:flex;flex-direction:column;gap:21px}
 .axis-head{font-size:14px;font-weight:600;display:flex;gap:9px;align-items:baseline;margin-bottom:11px}
 .axis-head .num{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:500;flex:none}
