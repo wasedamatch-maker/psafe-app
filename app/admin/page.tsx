@@ -112,7 +112,7 @@ export default function AdminPage() {
       </div>
 
       {/* サマリーカード */}
-      <div style={S.summaryRow}>
+      <div className="summary-row" style={S.summaryRow}>
         <SummaryCard label="総参加者数" value={totalMembers} icon={<Users size={18} />} />
         <SummaryCard label="総記録数" value={totalResponses} icon={<BarChart2 size={18} />} />
         <SummaryCard label="クラス数" value={CLASSES.length} icon={<BarChart2 size={18} />} />
@@ -613,7 +613,7 @@ function SummaryCard({ label, value, icon }: { label: string; value: number; ico
 
 // ── スタイル定数 ──────────────────────────────────────────────
 const S: Record<string, React.CSSProperties> = {
-  root: { maxWidth: 860, margin: "0 auto", padding: "28px 18px 80px", background: "var(--paper)", minHeight: "100vh", fontFamily: "var(--sans)", color: "var(--ink)", lineHeight: 1.6 },
+  root: { width: "100%", maxWidth: 860, minWidth: 0, margin: "0 auto", padding: "28px 18px 80px", background: "var(--paper)", minHeight: "100vh", fontFamily: "var(--sans)", color: "var(--ink)", lineHeight: 1.6 },
   loginBox: { maxWidth: 340, margin: "80px auto", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 16, padding: "36px 28px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 },
   loginTitle: { fontSize: 22, fontWeight: 800, margin: 0 },
   loginSub: { fontSize: 13, color: "var(--muted)", margin: 0 },
