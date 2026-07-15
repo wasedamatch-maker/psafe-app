@@ -10,6 +10,7 @@ import {
   getMyResponses,
   getTeamItemSpread,
   getTeamSpreadTimeline,
+  getTeamItemSpreadTimeline,
 } from "@/lib/psafe";
 import type { MyResponse, Spread, Team } from "@/lib/psafe";
 
@@ -24,6 +25,9 @@ const ITEMS = [
   { key: "妨害なし", text: "自分の努力をわざと邪魔する人はいない" },
   { key: "強み",     text: "自分ならではの持ち味が、活かされている" },
 ];
+
+// 7項目それぞれの線の色（項目別グラフの凡例と共有）
+const ITEM_COLORS = ["#3C7B8B", "#B0814F", "#6C8E68", "#9A6FA6", "#C56B5A", "#4E6A9B", "#7A828E"];
 
 const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 const fmt = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(Math.round(n));
@@ -54,6 +58,25 @@ function buildWeekly(sorted: MyResponse[]): WeekAgg[] {
   });
 }
 
+// 班の「週ごと×項目ごとのばらつき」(Spread[]) を、週×7項目の表に組み替える。
+// 返り値: weeks=週ラベルの配列, series=項目ごとの{key, values} 配列（valuesは週順のばらつき）。
+type ItemSeries = { weeks: string[]; series: { key: string; values: (number | null)[] }[] };
+function pivotItemTimeline(rows: Spread[]): ItemSeries {
+  const weekKeys = [...new Set(rows.map((r) => r.week!).filter(Boolean))].sort();
+  const weeks = weekKeys.map((w) => {
+    const d = new Date(w);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+  const series = ITEMS.map((it, i) => {
+    const values = weekKeys.map((w) => {
+      const row = rows.find((r) => r.week === w && r.item_index === i + 1);
+      return row ? Number(row.dispersion) : null;
+    });
+    return { key: it.key, values };
+  });
+  return { weeks, series };
+}
+
 export default function App() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
@@ -67,6 +90,7 @@ export default function App() {
   const [responses, setResponses] = useState<MyResponse[]>([]);
   const [itemSpread, setItemSpread] = useState<Spread[]>([]);
   const [timeline, setTimeline] = useState<Spread[]>([]);
+  const [itemTimeline, setItemTimeline] = useState<Spread[]>([]);
   const [saving, setSaving] = useState(false);
   const [chkTranslate, setChkTranslate] = useState(false);
   const [chkDevice, setChkDevice] = useState(false);
@@ -94,14 +118,16 @@ export default function App() {
     if (!teamId) return;
     (async () => {
       try {
-        const [r, is, tl] = await Promise.all([
+        const [r, is, tl, itl] = await Promise.all([
           getMyResponses(),
           getTeamItemSpread(teamId),
           getTeamSpreadTimeline(teamId),
+          getTeamItemSpreadTimeline(teamId),
         ]);
         setResponses(r);
         setItemSpread(is);
         setTimeline(tl);
+        setItemTimeline(itl);
       } catch (e) {
         console.error(e);
       }
@@ -161,12 +187,14 @@ export default function App() {
   const refreshShare = async () => {
     if (!teamId) return;
     try {
-      const [is, tl] = await Promise.all([
+      const [is, tl, itl] = await Promise.all([
         getTeamItemSpread(teamId),
         getTeamSpreadTimeline(teamId),
+        getTeamItemSpreadTimeline(teamId),
       ]);
       setItemSpread(is);
       setTimeline(tl);
+      setItemTimeline(itl);
     } catch (e) { console.error(e); }
   };
 
@@ -207,7 +235,7 @@ export default function App() {
       <main>
         {view === "record" ? <RecordView draft={draft} setDraft={setDraft} memo={memo} setMemo={setMemo} onSave={handleSave} saving={saving} chkTranslate={chkTranslate} setChkTranslate={setChkTranslate} chkDevice={chkDevice} setChkDevice={setChkDevice} />
           : view === "self" ? <SelfView sorted={sorted} overall={overall} />
-          : <ShareView slot={teamSlot} itemSpread={itemSpread} timeline={timeline} />}
+          : <ShareView slot={teamSlot} itemSpread={itemSpread} timeline={timeline} itemTimeline={itemTimeline} />}
       </main>
 
       <footer className="foot">
@@ -345,6 +373,8 @@ function Axis({ n, text, value, onChange }: { n: number; text: string; value: nu
 
 function SelfView({ sorted, overall }: { sorted: MyResponse[]; overall: number[] }) {
   const [mode, setMode] = useState<"total" | "weekly">("total");
+  const [active, setActive] = useState<boolean[]>(ITEMS.map(() => true));
+  const toggle = (i: number) => setActive((a) => a.map((v, k) => (k === i ? !v : v)));
   const weeks = useMemo(() => buildWeekly(sorted), [sorted]);
 
   if (sorted.length === 0) {
@@ -383,7 +413,16 @@ function SelfView({ sorted, overall }: { sorted: MyResponse[]; overall: number[]
       ) : (
         <>
           <Trend values={weeks.map((w) => w.overall)} caption="週ごとの総合（その週の平均）の推移" />
-          <h3 className="sub">週ごと・項目別の平均（0がどちらでもない）</h3>
+          <div className="trendcap"><span>週ごと・項目別の平均（0がどちらでもない）</span><span className="mono">上＝そう思う</span></div>
+          <MultiLineChart
+            centered
+            active={active}
+            labels={weeks.map((w) => w.label)}
+            series={ITEMS.map((it, i) => ({ key: it.key, values: weeks.map((w) => w.items[i]) }))}
+          />
+          <ItemLegend active={active} onToggle={toggle} />
+          <p className="hint">凡例をタップすると、その項目の線を表示／非表示できます。</p>
+          <h3 className="sub">週ごと・項目別の平均（表）</h3>
           <WeeklyItemTable weeks={weeks} />
           <p className="hint">同じ週に複数回記録した場合は、その週の平均です。横にスライドすると全項目が見られます。</p>
         </>
@@ -469,11 +508,74 @@ function Trend({ values, caption = "総合（7項目の平均）の推移" }: { 
   );
 }
 
-function ShareView({ slot, itemSpread, timeline }: { slot: number | null; itemSpread: Spread[]; timeline: Spread[] }) {
+// 7項目を1枚にまとめた折れ線グラフ。
+// centered=true: 中央0基準（個人の項目別平均、-50..50）／ false: 下端0基準（ばらつき）。
+function MultiLineChart({ series, labels, centered, maxV, active }: {
+  series: { key: string; values: (number | null)[] }[];
+  labels: string[];
+  centered: boolean;
+  maxV?: number;
+  active?: boolean[];
+}) {
+  const W = 640, H = centered ? 168 : 150, pad = 16, n = labels.length;
+  const shown = series.filter((_, si) => !active || active[si]);
+  const allVals = shown.flatMap((s) => s.values).filter((v): v is number => v != null);
+  const top = maxV ?? Math.max(...allVals, 1);
+  const x = (i: number) => pad + (n <= 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (n - 1));
+  const y = centered
+    ? (v: number) => H / 2 - (v / 50) * (H / 2 - pad)
+    : (v: number) => (H - pad) - (v / top) * (H - 2 * pad);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="trend" preserveAspectRatio="none">
+      {centered
+        ? <line x1={pad} y1={H / 2} x2={W - pad} y2={H / 2} className="originline" />
+        : <line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} className="originline" />}
+      {series.map((s, si) => {
+        if (active && !active[si]) return null;
+        const pts = s.values
+          .map((v, i) => (v == null ? null : [x(i), y(v)] as [number, number]))
+          .filter((p): p is [number, number] => p != null);
+        if (pts.length === 0) return null;
+        const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+        return (
+          <g key={s.key}>
+            <path d={path} fill="none" stroke={ITEM_COLORS[si]} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
+            {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={2.6} fill={ITEM_COLORS[si]} />)}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// タップで各項目の表示/非表示を切り替えられる凡例。
+function ItemLegend({ active, onToggle }: { active: boolean[]; onToggle: (i: number) => void }) {
+  return (
+    <div className="legend">
+      {ITEMS.map((it, i) => (
+        <button
+          key={it.key}
+          type="button"
+          className={"lg" + (active[i] ? "" : " off")}
+          aria-pressed={active[i]}
+          onClick={() => onToggle(i)}
+        >
+          <i style={{ background: active[i] ? ITEM_COLORS[i] : "transparent", borderColor: ITEM_COLORS[i] }} />
+          {it.key}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ShareView({ slot, itemSpread, timeline, itemTimeline }: { slot: number | null; itemSpread: Spread[]; timeline: Spread[]; itemTimeline: Spread[] }) {
   const [copied, setCopied] = useState(false);
   const [mode, setMode] = useState<"total" | "weekly">("total");
+  const [active, setActive] = useState<boolean[]>(ITEMS.map(() => true));
+  const toggle = (i: number) => setActive((a) => a.map((v, k) => (k === i ? !v : v)));
 
   const spreadValues = timeline.map((t) => Number(t.dispersion));
+  const itemPivot = useMemo(() => pivotItemTimeline(itemTimeline), [itemTimeline]);
   const minN = itemSpread.length > 0 ? Math.min(...itemSpread.map((s) => Number(s.n))) : 0;
   const hasEnoughData = minN >= 3;
 
@@ -520,11 +622,19 @@ function ShareView({ slot, itemSpread, timeline }: { slot: number | null; itemSp
             </>
           ) : (
             <>
-              {spreadValues.length > 0 ? (
+              {itemPivot.weeks.length > 0 ? (
                 <>
-                  <div className="trendcap"><span>第{slot}班・感じ方のばらつきの推移（週ごと）</span><span className="mono">下＝揃ってる</span></div>
+                  <div className="trendcap"><span>第{slot}班・項目ごとの「ばらつき」の推移（週ごと）</span><span className="mono">下＝揃ってる</span></div>
+                  <MultiLineChart centered={false} active={active} labels={itemPivot.weeks} series={itemPivot.series} />
+                  <ItemLegend active={active} onToggle={toggle} />
+                  <p className="hint">凡例をタップすると項目の線を表示／非表示できます。線が下がっている観点は班の感じ方が揃ってきたサイン。上がっている観点は、人による差が広がっている合図です。</p>
+                </>
+              ) : spreadValues.length > 0 ? (
+                <>
+                  <div className="trendcap"><span>第{slot}班・感じ方のばらつきの推移（週ごと・全体）</span><span className="mono">下＝揃ってる</span></div>
                   <SpreadChart values={spreadValues} />
                   <p className="hint">週を追うごとに下がっていれば、班の感じ方が揃ってきているサイン。上がっていれば、割れが広がっている合図です。</p>
+                  <p className="note">※項目ごとの推移を出すには、管理者がSupabaseで <code>team_item_spread_timeline</code> 関数を追加する必要があります。</p>
                 </>
               ) : (
                 <p className="note" style={{ textAlign: "center", padding: "20px 0" }}>
@@ -638,6 +748,11 @@ const CSS = `
 .trend .line{fill:none;stroke:#3a4150;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .trend .sfill{fill:rgba(176,129,79,.10)}
 .trend .sdot{fill:#7d6a52}
+.legend{display:flex;flex-wrap:wrap;gap:6px 10px;margin:8px 0 2px}
+.legend .lg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#48505c;background:none;border:0;padding:3px 5px;border-radius:7px;cursor:pointer;font-family:var(--sans);-webkit-tap-highlight-color:transparent}
+.legend .lg:hover{background:#eef0f3}
+.legend .lg i{width:11px;height:11px;border-radius:3px;flex:none;display:inline-block;border:1.5px solid transparent}
+.legend .lg.off{color:#b3b8c0;text-decoration:line-through}
 .seg{display:inline-flex;background:#eef0f3;border:1px solid var(--line);border-radius:99px;padding:3px;gap:2px;margin:0 0 4px}
 .seg button{background:none;border:0;padding:7px 18px;font-family:var(--sans);font-size:13px;color:var(--muted);cursor:pointer;border-radius:99px;transition:background .12s,color .12s}
 .seg button.on{background:var(--surface);color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(30,34,42,.10)}

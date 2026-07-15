@@ -91,6 +91,12 @@ export async function getTeamSpreadTimeline(teamId: string): Promise<Spread[]> {
   if (error) throw error;
   return data as Spread[];
 }
+// 週ごと×項目ごとのばらつき（新規RPC。未作成の環境では [] を返して画面を壊さない）
+export async function getTeamItemSpreadTimeline(teamId: string): Promise<Spread[]> {
+  const { data, error } = await supabase.rpc("team_item_spread_timeline", { p_team: teamId });
+  if (error) { console.error(error); return []; }
+  return data as Spread[];
+}
 export async function getClassSpreadTimeline(classId: number): Promise<Spread[]> {
   const { data, error } = await supabase.rpc("class_spread_timeline", { p_class: classId });
   if (error) throw error;

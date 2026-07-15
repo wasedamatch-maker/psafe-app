@@ -141,6 +141,29 @@ language sql security definer set search_path = public as $$
   from per_person_week group by week order by week;
 $$;
 
+-- 班の「週ごと×項目ごと」のばらつきの推移
+-- 週ごとに、各項目(1..7)について参加者の値の標準偏差を出す。
+-- （同じ週に複数回答した人は、その週・その項目で平均して1人1値にしてから偏差を取る）
+create or replace function public.team_item_spread_timeline(p_team uuid)
+returns table (week date, item_index int, dispersion numeric, n bigint)
+language sql security definer set search_path = public as $$
+  with per_person_week as (
+    select date_trunc('week', recorded_at)::date as week,
+           participant_id,
+           s.idx::int as item_index,
+           avg(s.val::numeric) as val
+    from responses, unnest(scores) with ordinality as s(val, idx)
+    where team_id = p_team
+    group by 1, 2, 3
+  )
+  select week, item_index,
+         coalesce(stddev_samp(val), 0) as dispersion,
+         count(*) as n
+  from per_person_week
+  group by week, item_index
+  order by week, item_index;
+$$;
+
 -- クラス全体のばらつきの推移（Slackサマリー用）
 create or replace function public.class_spread_timeline(p_class smallint)
 returns table (week date, dispersion numeric, n bigint)
@@ -160,8 +183,9 @@ language sql security definer set search_path = public as $$
   from per_person_week group by week order by week;
 $$;
 
-grant execute on function public.team_item_spread(uuid)        to authenticated;
-grant execute on function public.team_spread_timeline(uuid)    to authenticated;
+grant execute on function public.team_item_spread(uuid)          to authenticated;
+grant execute on function public.team_spread_timeline(uuid)      to authenticated;
+grant execute on function public.team_item_spread_timeline(uuid) to authenticated;
 grant execute on function public.class_spread_timeline(smallint) to authenticated;
 -- 注: いまは誰でも任意のteam/classのばらつきを呼べる（=ばらつきのみなので低リスク）。
 --     班内に限定したいなら、関数冒頭で auth.uid() の所属チェックを足す。
