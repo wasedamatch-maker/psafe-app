@@ -22,6 +22,31 @@ const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.lengt
 const fmt = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(Math.round(n));
 const dirColor = (n: number) => (n > 1 ? "var(--up)" : n < -1 ? "var(--down)" : "var(--muted)");
 
+// その日が属する週の月曜日（YYYY-MM-DD）。
+function weekStart(dateStr: string): string {
+  const d = new Date(dateStr);
+  const dow = (d.getDay() + 6) % 7; // 0=月曜
+  d.setDate(d.getDate() - dow);
+  d.setHours(0, 0, 0, 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// 記録を週ごとにまとめる（同じ週に複数回なら平均）。
+type WeekAgg = { key: string; label: string; overall: number; items: number[] };
+function buildWeekly(sorted: Resp[]): WeekAgg[] {
+  const map = new Map<string, Resp[]>();
+  for (const r of sorted) {
+    const k = weekStart(r.recorded_at);
+    (map.get(k) ?? map.set(k, []).get(k)!).push(r);
+  }
+  return [...map.keys()].sort().map((k) => {
+    const rs = map.get(k)!;
+    const items = ITEMS.map((_, i) => mean(rs.map((r) => r.scores[i])));
+    const d = new Date(k);
+    return { key: k, label: `${d.getMonth() + 1}/${d.getDate()}`, overall: mean(items), items };
+  });
+}
+
 // ── ダミーの初期データ（最初から数回分入っている）─────────────────
 const SEED_RESPONSES: Resp[] = [
   { id: "d1", recorded_at: "2026-05-13", scores: [-12, -20, -5, -15, -8, 0, 5], memo: "初回。まだ様子見で、あまり話せていない。" },
@@ -193,6 +218,9 @@ function Axis({ n, text, value, onChange }: { n: number; text: string; value: nu
 }
 
 function SelfView({ sorted, overall }: { sorted: Resp[]; overall: number[] }) {
+  const [mode, setMode] = useState<"total" | "weekly">("total");
+  const weeks = useMemo(() => buildWeekly(sorted), [sorted]);
+
   if (sorted.length === 0) {
     return (
       <section className="card empty-card">
@@ -212,11 +240,29 @@ function SelfView({ sorted, overall }: { sorted: Resp[]; overall: number[] }) {
         <Delta label="自分の平均から" v={cur - avg} />
         <Delta label="初回から" v={cur - first} />
       </div>
-      <Trend values={overall} />
-      <h3 className="sub">いまの、項目ごとの振れ（0がどちらでもない）</h3>
-      <div className="bars">
-        {ITEMS.map((it, i) => <ItemBar key={it.key} label={it.key} v={last.scores[i]} />)}
+
+      <div className="seg" role="tablist">
+        <button role="tab" aria-selected={mode === "total"} className={mode === "total" ? "on" : ""} onClick={() => setMode("total")}>総合</button>
+        <button role="tab" aria-selected={mode === "weekly"} className={mode === "weekly" ? "on" : ""} onClick={() => setMode("weekly")}>週ごと</button>
       </div>
+
+      {mode === "total" ? (
+        <>
+          <Trend values={overall} caption="総合（7項目の平均）の推移" />
+          <h3 className="sub">いまの、項目ごとの振れ（0がどちらでもない）</h3>
+          <div className="bars">
+            {ITEMS.map((it, i) => <ItemBar key={it.key} label={it.key} v={last.scores[i]} />)}
+          </div>
+        </>
+      ) : (
+        <>
+          <Trend values={weeks.map((w) => w.overall)} caption="週ごとの総合（その週の平均）の推移" />
+          <h3 className="sub">週ごと・項目別の平均（0がどちらでもない）</h3>
+          <WeeklyItemTable weeks={weeks} />
+          <p className="hint">同じ週に複数回記録した場合は、その週の平均です。横にスライドすると全項目が見られます。</p>
+        </>
+      )}
+
       <h3 className="sub">メモの履歴</h3>
       <ul className="log">
         {[...sorted].reverse().map((s) => (
@@ -228,6 +274,33 @@ function SelfView({ sorted, overall }: { sorted: Resp[]; overall: number[] }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function WeeklyItemTable({ weeks }: { weeks: WeekAgg[] }) {
+  return (
+    <div className="wtbl-wrap">
+      <table className="wtbl">
+        <thead>
+          <tr>
+            <th className="wk">週</th>
+            {ITEMS.map((it) => <th key={it.key}>{it.key}</th>)}
+            <th>総合</th>
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((w) => (
+            <tr key={w.key}>
+              <td className="wk">{w.label}</td>
+              {w.items.map((v, i) => (
+                <td key={i} style={{ color: dirColor(v) }}>{fmt(v)}</td>
+              ))}
+              <td style={{ color: dirColor(w.overall), fontWeight: 700 }}>{fmt(w.overall)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -250,7 +323,7 @@ function ItemBar({ label, v }: { label: string; v: number }) {
   );
 }
 
-function Trend({ values }: { values: number[] }) {
+function Trend({ values, caption = "総合（7項目の平均）の推移" }: { values: number[]; caption?: string }) {
   const W = 640, H = 168, pad = 16, n = values.length;
   const x = (i: number) => pad + (n <= 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (n - 1));
   const y = (v: number) => H / 2 - (v / 50) * (H / 2 - pad);
@@ -258,7 +331,7 @@ function Trend({ values }: { values: number[] }) {
   const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
   return (
     <div className="trendwrap">
-      <div className="trendcap"><span>総合（7項目の平均）の推移</span><span className="mono">0 = どちらでもない</span></div>
+      <div className="trendcap"><span>{caption}</span><span className="mono">0 = どちらでもない</span></div>
       <svg viewBox={`0 0 ${W} ${H}`} className="trend" preserveAspectRatio="none">
         <line x1={pad} y1={y(25)} x2={W - pad} y2={y(25)} className="grid" />
         <line x1={pad} y1={y(-25)} x2={W - pad} y2={y(-25)} className="grid" />
@@ -272,6 +345,7 @@ function Trend({ values }: { values: number[] }) {
 
 function ShareView({ slot, itemSpread, timeline }: { slot: number | null; itemSpread: Spread[]; timeline: Spread[] }) {
   const [copied, setCopied] = useState(false);
+  const [mode, setMode] = useState<"total" | "weekly">("total");
 
   const spreadValues = timeline.map((t) => Number(t.dispersion));
   const minN = itemSpread.length > 0 ? Math.min(...itemSpread.map((s) => Number(s.n))) : 0;
@@ -302,20 +376,37 @@ function ShareView({ slot, itemSpread, timeline }: { slot: number | null; itemSp
         </p>
       ) : (
         <>
-          {spreadValues.length > 0 && (
+          <div className="seg" role="tablist">
+            <button role="tab" aria-selected={mode === "total"} className={mode === "total" ? "on" : ""} onClick={() => setMode("total")}>総合</button>
+            <button role="tab" aria-selected={mode === "weekly"} className={mode === "weekly" ? "on" : ""} onClick={() => setMode("weekly")}>週ごと</button>
+          </div>
+
+          {mode === "total" ? (
             <>
-              <div className="trendcap"><span>第{slot}班・感じ方のばらつきの推移</span><span className="mono">下＝揃ってる</span></div>
-              <SpreadChart values={spreadValues} />
+              <h3 className="sub">いま、どの観点が割れている？（全体）</h3>
+              <div className="bars">
+                {ranked.map((r, i) => <SpreadBar key={r.k} label={r.k} s={Math.min(r.s * 2, 100)} top={i === 0} />)}
+              </div>
+              <p className="hint">割れている観点ほど「人によって感じ方が違う」場所。揃える対象ではなく、声をかける・確認する手がかりとして。</p>
+              <h3 className="sub">クラスSlackへ貼る用</h3>
+              <pre className="slack">{text}</pre>
+              <button className="ghost" onClick={copy}>{copied ? <><Check size={15} /> コピーしました</> : <><Copy size={15} /> コピー</>}</button>
+            </>
+          ) : (
+            <>
+              {spreadValues.length > 0 ? (
+                <>
+                  <div className="trendcap"><span>第{slot}班・感じ方のばらつきの推移（週ごと）</span><span className="mono">下＝揃ってる</span></div>
+                  <SpreadChart values={spreadValues} />
+                  <p className="hint">週を追うごとに下がっていれば、班の感じ方が揃ってきているサイン。上がっていれば、割れが広がっている合図です。</p>
+                </>
+              ) : (
+                <p className="note" style={{ textAlign: "center", padding: "20px 0" }}>
+                  まだ週ごとの推移を出せる記録がありません。<br />記録がたまると、ここに週ごとの折れ線が出ます。
+                </p>
+              )}
             </>
           )}
-          <h3 className="sub">いま、どの観点が割れている？</h3>
-          <div className="bars">
-            {ranked.map((r, i) => <SpreadBar key={r.k} label={r.k} s={Math.min(r.s * 2, 100)} top={i === 0} />)}
-          </div>
-          <p className="hint">割れている観点ほど「人によって感じ方が違う」場所。揃える対象ではなく、声をかける・確認する手がかりとして。</p>
-          <h3 className="sub">クラスSlackへ貼る用</h3>
-          <pre className="slack">{text}</pre>
-          <button className="ghost" onClick={copy}>{copied ? <><Check size={15} /> コピーしました</> : <><Copy size={15} /> コピー</>}</button>
         </>
       )}
     </section>
@@ -358,7 +449,7 @@ const CSS = `
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
-.root{max-width:720px;margin:0 auto;padding:28px 18px 60px;background:var(--paper);color:var(--ink);font-family:var(--sans);min-height:100vh;-webkit-font-smoothing:antialiased;line-height:1.6}
+.root{width:100%;min-width:0;max-width:720px;margin:0 auto;padding:28px 18px 60px;background:var(--paper);color:var(--ink);font-family:var(--sans);min-height:100vh;-webkit-font-smoothing:antialiased;line-height:1.6}
 .demobar{display:flex;align-items:center;gap:9px;background:#fbf3e6;border:1px solid #e6c79b;color:#7a4f16;border-radius:10px;padding:10px 13px;font-size:12.5px;margin-bottom:18px}
 .demobar b{color:#5e3d10}
 .demobar span{flex:1}
@@ -416,6 +507,17 @@ const CSS = `
 .trend .line{fill:none;stroke:#3a4150;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .trend .sfill{fill:rgba(176,129,79,.10)}
 .trend .sdot{fill:#7d6a52}
+.seg{display:inline-flex;background:#eef0f3;border:1px solid var(--line);border-radius:99px;padding:3px;gap:2px;margin:0 0 4px}
+.seg button{background:none;border:0;padding:7px 18px;font-family:var(--sans);font-size:13px;color:var(--muted);cursor:pointer;border-radius:99px;transition:background .12s,color .12s}
+.seg button.on{background:var(--surface);color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(30,34,42,.10)}
+.wtbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:6px 0 4px;border:1px solid var(--line);border-radius:10px}
+.wtbl{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}
+.wtbl th,.wtbl td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:7px 10px;text-align:center;white-space:nowrap;font-family:var(--mono)}
+.wtbl tr:last-child th,.wtbl tr:last-child td{border-bottom:0}
+.wtbl th:last-child,.wtbl td:last-child{border-right:0}
+.wtbl thead th{background:#f5f6f8;font-weight:700;color:#48505c;font-size:11.5px;position:sticky;top:0}
+.wtbl .wk{background:#fafbfc;color:var(--muted);position:sticky;left:0;z-index:1}
+.wtbl thead th.wk{z-index:2}
 .sub{font-size:13px;font-weight:700;color:#3a414c;margin:26px 0 12px}
 .bars{display:flex;flex-direction:column;gap:9px}
 .ib{display:grid;grid-template-columns:62px 1fr 78px;align-items:center;gap:10px}
