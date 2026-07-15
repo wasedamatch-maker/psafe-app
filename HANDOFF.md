@@ -78,6 +78,15 @@ DBを一から作り直す場合は、Supabase の SQL Editor で**この順に*
 
 > 譲渡・招待は本人ログインが必要な Web 操作です。上から順に。
 
+### 📌 現在の進捗（ここから再開）
+- **方針**：全部を新GitHubアカウントへ完全譲渡。運用者は未定。
+- **決定事項**：Supabase は **既存プロジェクトをそのまま渡す**（データそのまま・鍵そのまま・Vercel環境変数の変更不要）。
+- **完了済み（Part A / リポジトリ準備）**：`db/schema.sql` `db/admin_functions.sql` `.env.example` `HANDOFF.md` `README.md` を追加・コミット済み（commit `d9a76d3`、現リポジトリにpush済み）。
+- **未完了（Part B / 要Web操作）**：GitHub譲渡・Vercel再連携・Supabaseメンバー招待は未着手。
+- **再開に必要な入力**：**新しいGitHubアカウントのユーザー名**（まだ未確定）。
+- **次の一手**：ユーザー名が決まったら下の (1) GitHub譲渡 から順に実施。譲渡後、ローカルのリモートURL付け替え（`git remote set-url origin ...`）をアシスタントに依頼する。
+
+
 ### (1) GitHub リポジトリの譲渡
 - [ ] `github.com/wasedamatch-maker/psafe-app` → **Settings** → 一番下 **Danger Zone**
 - [ ] **Transfer ownership** → 新しいアカウントのユーザー名を入力して実行
