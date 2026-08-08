@@ -27,12 +27,30 @@ create table public.teams (
   unique (class_id, slot)
 );
 
--- ── 参加者：匿名authユーザ ↔ 班 ─────────────────────────────
+-- ── 参加者：本人 = 班の中で一意なニックネーム＋PIN ───────────────
+--  id は端末非依存の「人ID」。auth.uid() には縛らない（別端末でも同じ人でいられる）。
+--  端末(auth.uid())との対応は participant_devices が持つ。
 create table public.participants (
-  id         uuid primary key references auth.users(id) on delete cascade,  -- = auth.uid()
+  id         uuid primary key default gen_random_uuid(),
   team_id    uuid not null references public.teams(id),
+  nickname   text,                            -- 班の中で一意（下の部分ユニークindex）
+  pin_hash   text,                            -- bcrypt(pgcrypto)。平文は保存しない・返さない
   joined_at  timestamptz not null default now()
 );
+-- ニックネームは班の中で一意（NULL可＝旧データ互換）
+create unique index participants_team_nickname_uniq
+  on public.participants (team_id, nickname) where nickname is not null;
+
+-- ── 端末 ↔ 参加者 の橋渡し（匿名authユーザ = 端末セッション）─────
+--  1人が複数端末からアクセスできるよう、auth.uid() を参加者にひも付ける。
+--  作成/削除は register/claim RPC(SECURITY DEFINER)経由のみ。
+create table public.participant_devices (
+  participant_id uuid not null references public.participants(id) on delete cascade,
+  auth_uid       uuid not null,
+  linked_at      timestamptz not null default now(),
+  primary key (participant_id, auth_uid)
+);
+create index on public.participant_devices (auth_uid);
 
 -- ── 回答（1回の記録 = 1セッション）──────────────────────────
 create table public.responses (
@@ -63,37 +81,63 @@ create trigger trg_validate_scores before insert or update on public.responses
 -- ════════════════════════════════════════════════════════════════
 --  RLS  ─ ここが本体
 -- ════════════════════════════════════════════════════════════════
-alter table public.classes      enable row level security;
-alter table public.teams        enable row level security;
-alter table public.participants enable row level security;
-alter table public.responses    enable row level security;
+alter table public.classes            enable row level security;
+alter table public.teams              enable row level security;
+alter table public.participants       enable row level security;
+alter table public.participant_devices enable row level security;
+alter table public.responses          enable row level security;
+
+-- 端末リンク：自分の端末の行だけ参照可（作成/削除は RPC 経由のみ）
+create policy "own device links" on public.participant_devices
+  for select using (auth_uid = auth.uid());
 
 -- classes / teams は選択画面で全員が読む
 create policy "classes readable" on public.classes for select using (true);
 create policy "teams readable"   on public.teams   for select using (true);
 
--- ★チーム名の編集：その班に所属している人だけ name を更新できる
+-- ★チーム名の編集：その班に所属している人だけ name を更新できる（端末リンク経由で判定）
 create policy "team name editable by members" on public.teams
   for update using (
-    exists (select 1 from public.participants p
-            where p.id = auth.uid() and p.team_id = teams.id)
+    exists (select 1 from public.participant_devices pd
+            join public.participants p on p.id = pd.participant_id
+            where pd.auth_uid = auth.uid() and p.team_id = teams.id)
   ) with check (
-    exists (select 1 from public.participants p
-            where p.id = auth.uid() and p.team_id = teams.id)
+    exists (select 1 from public.participant_devices pd
+            join public.participants p on p.id = pd.participant_id
+            where pd.auth_uid = auth.uid() and p.team_id = teams.id)
   );
 
--- participants：自分の1行だけ（作成・参照・班の変更）
-create policy "own participant select" on public.participants for select using (id = auth.uid());
-create policy "own participant insert" on public.participants for insert with check (id = auth.uid());
+-- participants：自分がリンクしている参加者行だけ（pin_hash は列権限で別途遮断）
+--  作成は register/claim RPC 経由（SECURITY DEFINER）。直接 insert は開けない。
+create policy "own participant select" on public.participants for select
+  using (id in (select pd.participant_id from public.participant_devices pd
+                where pd.auth_uid = auth.uid()));
 create policy "own participant update" on public.participants for update
-  using (id = auth.uid()) with check (id = auth.uid());
+  using (id in (select pd.participant_id from public.participant_devices pd
+                where pd.auth_uid = auth.uid()))
+  with check (id in (select pd.participant_id from public.participant_devices pd
+                     where pd.auth_uid = auth.uid()));
 
--- responses：自分の回答だけ。他人の生データ・メモへの経路は存在しない
-create policy "own responses select" on public.responses for select using (participant_id = auth.uid());
-create policy "own responses insert" on public.responses for insert with check (participant_id = auth.uid());
+-- pin_hash はクライアントに一切読ませない
+--  テーブル全体の SELECT を外し、安全な列だけ付け直す（列 revoke 単独では効かないため）
+revoke select on public.participants from anon, authenticated;
+grant  select (id, team_id, nickname, joined_at) on public.participants to anon, authenticated;
+
+-- responses：自分の回答だけ。他人の生データ・メモへの経路は存在しない（端末リンク経由で判定）
+create policy "own responses select" on public.responses for select
+  using (participant_id in (select pd.participant_id from public.participant_devices pd
+                            where pd.auth_uid = auth.uid()));
+create policy "own responses insert" on public.responses for insert
+  with check (participant_id in (select pd.participant_id from public.participant_devices pd
+                                 where pd.auth_uid = auth.uid()));
 create policy "own responses update" on public.responses for update
-  using (participant_id = auth.uid()) with check (participant_id = auth.uid());
-create policy "own responses delete" on public.responses for delete using (participant_id = auth.uid());
+  using (participant_id in (select pd.participant_id from public.participant_devices pd
+                            where pd.auth_uid = auth.uid()))
+  with check (participant_id in (select pd.participant_id from public.participant_devices pd
+                                 where pd.auth_uid = auth.uid()));
+create policy "own responses delete" on public.responses for delete
+  using (participant_id in (select pd.participant_id from public.participant_devices pd
+                            where pd.auth_uid = auth.uid()));
 
 -- ════════════════════════════════════════════════════════════════
 --  集計関数（SECURITY DEFINER）
@@ -191,6 +235,62 @@ grant execute on function public.class_spread_timeline(smallint) to authenticate
 --     班内に限定したいなら、関数冒頭で auth.uid() の所属チェックを足す。
 
 -- ════════════════════════════════════════════════════════════════
+--  本人確認つき 登録 / 復帰（SECURITY DEFINER）
+--  どちらも成功時に「この端末(auth.uid())」を参加者にひも付けて id を返す。
+--  PIN は bcrypt で照合。平文は保存も返却もしない。
+-- ════════════════════════════════════════════════════════════════
+create or replace function public.register_participant(
+  p_team uuid, p_nickname text, p_pin text
+) returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_name text := nullif(btrim(p_nickname), '');
+  v_pid  uuid;
+begin
+  if v_uid is null then raise exception 'not authenticated'; end if;
+  if v_name is null then raise exception 'nickname required'; end if;
+  if p_pin is null or length(p_pin) < 3 then raise exception 'pin too short'; end if;
+  if exists (select 1 from participants where team_id = p_team and nickname = v_name) then
+    raise exception 'nickname taken';
+  end if;
+
+  insert into participants (team_id, nickname, pin_hash)
+    values (p_team, v_name, crypt(p_pin, gen_salt('bf')))
+    returning id into v_pid;
+
+  delete from participant_devices where auth_uid = v_uid;      -- 1端末＝1アクティブ参加者
+  insert into participant_devices (participant_id, auth_uid) values (v_pid, v_uid);
+  return v_pid;
+end $$;
+
+create or replace function public.claim_participant(
+  p_team uuid, p_nickname text, p_pin text
+) returns uuid
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_name text := nullif(btrim(p_nickname), '');
+  v_pid  uuid;
+begin
+  if v_uid is null then raise exception 'not authenticated'; end if;
+  if v_name is null then raise exception 'nickname required'; end if;
+
+  select id into v_pid from participants
+   where team_id = p_team and nickname = v_name
+     and pin_hash is not null and pin_hash = crypt(p_pin, pin_hash);
+  if v_pid is null then raise exception 'invalid nickname or pin'; end if;
+
+  delete from participant_devices where auth_uid = v_uid;
+  insert into participant_devices (participant_id, auth_uid) values (v_pid, v_uid)
+    on conflict do nothing;
+  return v_pid;
+end $$;
+
+grant execute on function public.register_participant(uuid, text, text) to authenticated;
+grant execute on function public.claim_participant(uuid, text, text)   to authenticated;
+
+-- ════════════════════════════════════════════════════════════════
 --  初期データ（クラス4 × 班4 = 16班。名前は空のまま、後から命名）
 -- ════════════════════════════════════════════════════════════════
 insert into public.classes (id, label) values (1,'クラス1'),(2,'クラス2'),(3,'クラス3'),(4,'クラス4');
@@ -198,9 +298,13 @@ insert into public.teams (class_id, slot)
   select c.id, g from public.classes c cross join generate_series(1,4) g;
 
 -- ── クライアント側の流れ（参考）────────────────────────────────
---  1. 初回: const { data } = await supabase.auth.signInAnonymously()
---  2. クラス・班を選ぶ → upsert participants (id = auth.uid(), team_id)
---  3. 記録: insert into responses (participant_id = auth.uid(), team_id, scores, memo)
+--  1. 初回: await supabase.auth.signInAnonymously()（端末セッションの確保）
+--  2. クラス・班を選ぶ → 本人確認：
+--       はじめて: rpc('register_participant',{p_team,p_nickname,p_pin}) → participant_id
+--       別端末で継続: rpc('claim_participant',{p_team,p_nickname,p_pin}) → participant_id
+--     （どちらも この auth.uid() を participant_devices にひも付ける）
+--  3. 記録: insert into responses (participant_id, team_id, scores, memo)
+--          participant_id は 2 で得た自分の人ID。RLSは端末リンク経由で本人を判定。
 --  4. 自己理解: select scores, memo, recorded_at from responses（RLSで自分のみ）
 --  5. 班の共有: supabase.rpc('team_item_spread',{p_team}) / ('team_spread_timeline',{p_team})
 --  6. チーム名編集: update teams set name = '…' where id = team_id（RLSで所属者のみ）

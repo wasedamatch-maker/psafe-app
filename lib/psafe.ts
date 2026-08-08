@@ -34,35 +34,61 @@ export async function getTeams(classId: number): Promise<Team[]> {
   return data as Team[];
 }
 
-// ── 班に参加 / 所属の確認・変更 ────────────────────────────────
-// participants.id = auth.uid()。upsert なので「班の変更」も同じ関数でOK。
-export async function joinTeam(teamId: string) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("no session");
-  const { error } = await supabase
-    .from("participants")
-    .upsert({ id: user.id, team_id: teamId }, { onConflict: "id" });
+// ── 本人確認つき 登録 / 復帰 ───────────────────────────────────
+// 本人 = 班の中で一意なニックネーム＋PIN。RPC が成功時にこの端末(auth.uid())を
+// 参加者にひも付け、participant_id を返す。別端末でも名前＋PINで継続できる。
+export type MyParticipant = {
+  participant_id: string;
+  team_id: string;
+  nickname: string | null;
+  teams: { class_id: number; slot: number; name: string | null };
+};
+
+// はじめて：名前＋PINで新規登録
+export async function registerParticipant(teamId: string, nickname: string, pin: string): Promise<string> {
+  const { data, error } = await supabase.rpc("register_participant", {
+    p_team: teamId, p_nickname: nickname, p_pin: pin,
+  });
   if (error) throw error;
+  return data as string;
 }
 
-// 再訪時に所属班を復元。未参加なら null。
-export async function getMyTeam() {
+// 別端末から継続：名前＋PINで照合してひも付け
+export async function claimParticipant(teamId: string, nickname: string, pin: string): Promise<string> {
+  const { data, error } = await supabase.rpc("claim_participant", {
+    p_team: teamId, p_nickname: nickname, p_pin: pin,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+// 再訪時に、この端末にひも付く参加者（班・ニックネーム）を復元。未参加なら null。
+export async function getMyParticipant(): Promise<MyParticipant | null> {
   const { data, error } = await supabase
-    .from("participants")
-    .select("team_id, teams(class_id, slot, name)")
+    .from("participant_devices")
+    .select("participant_id, participants(id, team_id, nickname, teams(class_id, slot, name))")
     .maybeSingle();
   if (error) throw error;
-  return data; // { team_id, teams: { class_id, slot, name } } | null
+  if (!data) return null;
+  const p = data.participants as unknown as {
+    id: string; team_id: string; nickname: string | null;
+    teams: { class_id: number; slot: number; name: string | null };
+  };
+  return {
+    participant_id: p.id,
+    team_id: p.team_id,
+    nickname: p.nickname,
+    teams: p.teams,
+  };
 }
 
 // ── 記録（1回のセッション）────────────────────────────────────
 // scores は長さ7・各 -50..50（中央0 = 初対面）。memo は本人専用。
-export async function saveResponse(teamId: string, scores: number[], memo: string) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("no session");
+export async function saveResponse(participantId: string, teamId: string, scores: number[], memo: string) {
+  if (!participantId) throw new Error("no participant");
   if (scores.length !== ITEM_COUNT) throw new Error(`scores must be length ${ITEM_COUNT}`);
   const { error } = await supabase.from("responses").insert({
-    participant_id: user.id,
+    participant_id: participantId,
     team_id: teamId,
     scores,
     memo: memo.trim() || null,

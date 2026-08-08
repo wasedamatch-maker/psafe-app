@@ -3,9 +3,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { PenLine, Activity, Share2, Check, Copy, ChevronRight } from "lucide-react";
 import {
   ensureAnonSession,
-  getMyTeam,
+  getMyParticipant,
   getTeams,
-  joinTeam,
+  registerParticipant,
+  claimParticipant,
   saveResponse,
   getMyResponses,
   getTeamItemSpread,
@@ -78,6 +79,8 @@ function pivotItemTimeline(rows: Spread[]): ItemSeries {
 }
 
 export default function App() {
+  const [participantId, setParticipantId] = useState<string | null>(null);
+  const [nickname, setNickname] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [teamSlot, setTeamSlot] = useState<number | null>(null);
@@ -99,13 +102,14 @@ export default function App() {
     (async () => {
       try {
         await ensureAnonSession();
-        const my = await getMyTeam();
+        const my = await getMyParticipant();
         if (my) {
+          setParticipantId(my.participant_id);
+          setNickname(my.nickname);
           setTeamId(my.team_id);
-          const t = my.teams as unknown as { class_id: number; slot: number; name: string | null };
-          setTeamName(t.name);
-          setTeamSlot(t.slot);
-          setClassId(t.class_id);
+          setTeamName(my.teams.name);
+          setTeamSlot(my.teams.slot);
+          setClassId(my.teams.class_id);
         }
       } catch (e) {
         console.error(e);
@@ -136,24 +140,17 @@ export default function App() {
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
-  const handleJoinTeam = async (cId: number, slot: number) => {
-    try {
-      const teams = await getTeams(cId);
-      const team = teams.find((t: Team) => t.slot === slot);
-      if (!team) { flash("班が見つかりません"); return; }
-      await joinTeam(team.id);
-      setTeamId(team.id);
-      setTeamName(team.name ?? null);
-      setTeamSlot(slot);
-      setClassId(cId);
-    } catch (e) {
-      console.error(e);
-      flash("班への参加に失敗しました");
-    }
+  const handleJoined = (r: JoinResult) => {
+    setParticipantId(r.participantId);
+    setNickname(r.nickname);
+    setTeamId(r.teamId);
+    setTeamName(r.teamName);
+    setTeamSlot(r.slot);
+    setClassId(r.classId);
   };
 
   const handleSave = async () => {
-    if (!teamId || saving) return;
+    if (!teamId || !participantId || saving) return;
     if (!chkTranslate || !chkDevice) { flash("上の確認事項にチェックしてください"); return; }
     // 二重送信防止：直前（90秒以内）に記録があれば止める
     const lastAt = responses.length
@@ -167,7 +164,7 @@ export default function App() {
     // あえて2秒待つ：送信中だと分かるようにし、誤って何度も送るのを防ぐ
     await new Promise((res) => setTimeout(res, 2000));
     try {
-      await saveResponse(teamId, draft, memo);
+      await saveResponse(participantId, teamId, draft, memo);
       const r = await getMyResponses();
       setResponses(r);
       setDraft(ITEMS.map(() => 0));
@@ -204,7 +201,7 @@ export default function App() {
   const overall = useMemo(() => sorted.map((s) => mean(s.scores)), [sorted]);
 
   if (loading) return <div className="root"><style>{CSS}</style><div className="empty">読み込み中…</div></div>;
-  if (!teamId) return <div className="root"><style>{CSS}</style><Setup onDone={handleJoinTeam} /></div>;
+  if (!teamId || !participantId) return <div className="root"><style>{CSS}</style><Setup onDone={handleJoined} /></div>;
 
   return (
     <div className="root">
@@ -215,9 +212,10 @@ export default function App() {
           <span className="eyebrow">EDMONDSON · 7 ITEMS</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="ctx" style={{ cursor: "default" }}>
-              {teamName ?? `${classLabel(classId)} · 第${teamSlot}班`}
+              {nickname ? `${nickname} · ` : ""}{teamName ?? `${classLabel(classId)} · 第${teamSlot}班`}
             </span>
             <button className="ctx" onClick={() => {
+              setParticipantId(null); setNickname(null);
               setTeamId(null); setTeamSlot(null); setClassId(null); setTeamName(null);
             }}>変更</button>
           </div>
@@ -239,7 +237,7 @@ export default function App() {
       </main>
 
       <footer className="foot">
-        プロトタイプ／データはサーバ側に匿名で保存されます。名前は登録しません。
+        プロトタイプ／データはサーバ側に保存されます。登録するのはニックネームとPINだけ。本名・メールは登録しません。
       </footer>
 
       {toast && <div className="toast"><Check size={14} /> {toast}</div>}
@@ -248,12 +246,25 @@ export default function App() {
 }
 
 
-function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) {
+type JoinResult = {
+  participantId: string; nickname: string;
+  teamId: string; teamName: string | null; slot: number; classId: number;
+};
+
+function Setup({ onDone }: { onDone: (r: JoinResult) => void }) {
+  const [step, setStep] = useState<"pick" | "id">("pick");
   const [cls, setCls] = useState<number | null>(null);
   const [grp, setGrp] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
   const [fetchedTeams, setFetchedTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(false);
+
+  // 本人確認ステップの状態
+  const [mode, setMode] = useState<"new" | "continue">("new");
+  const [nick, setNick] = useState("");
+  const [pin, setPin] = useState("");
+  const [pin2, setPin2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
 
   const handleSelectClass = async (cId: number) => {
     setCls(cId);
@@ -269,21 +280,84 @@ function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) 
     setTeamsLoading(false);
   };
 
-  const go = async () => {
-    if (!cls || !grp) return;
-    setBusy(true);
-    await onDone(cls, grp);
-    setBusy(false);
-  };
-
   const slotCount = CLASSES.find((c) => c.id === cls)?.slots ?? 4;
   const slots = Array.from({ length: slotCount }, (_, i) => i + 1);
+  const selectedTeam = grp ? fetchedTeams.find((t) => t.slot === grp) : undefined;
+
+  const submit = async () => {
+    if (!cls || !grp || !selectedTeam || busy) return;
+    setErr("");
+    const name = nick.trim();
+    if (!name) { setErr("ニックネームを入力してください"); return; }
+    if (pin.length < 3) { setErr("PINは3文字以上にしてください"); return; }
+    if (mode === "new" && pin !== pin2) { setErr("PIN（確認）が一致しません"); return; }
+    setBusy(true);
+    try {
+      const participantId = mode === "new"
+        ? await registerParticipant(selectedTeam.id, name, pin)
+        : await claimParticipant(selectedTeam.id, name, pin);
+      onDone({
+        participantId, nickname: name,
+        teamId: selectedTeam.id, teamName: selectedTeam.name ?? null, slot: grp, classId: cls,
+      });
+    } catch (e) {
+      console.error(e);
+      const msg = String((e as { message?: string })?.message ?? "");
+      if (mode === "new" && msg.includes("nickname taken")) setErr("そのニックネームは同じ班で使われています。別の名前にしてください");
+      else if (mode === "continue") setErr("ニックネームかPINが違います");
+      else setErr("登録に失敗しました。時間をおいて試してください");
+      setBusy(false);
+    }
+  };
+
+  if (step === "id" && cls && grp) {
+    return (
+      <section className="setup">
+        <div className="eyebrow">SETUP</div>
+        <h1>あなたの名前を決める</h1>
+        <p className="lede">
+          {selectedTeam?.name ?? `第${grp}班`} で使う<b>ニックネーム</b>と、<b>PIN（あいことば）</b>を登録します。
+          次回は別の端末でも、この名前とPINで続きから記録できます。
+        </p>
+        <div className="segmented">
+          <button className={mode === "new" ? "on" : ""} onClick={() => { setMode("new"); setErr(""); }}>はじめて</button>
+          <button className={mode === "continue" ? "on" : ""} onClick={() => { setMode("continue"); setErr(""); }}>別の端末から続ける</button>
+        </div>
+        <div className="pick">
+          <div className="pl">ニックネーム</div>
+          <input className="tinput" value={nick} maxLength={20}
+            placeholder="例：あお、きりん など"
+            onChange={(e) => setNick(e.target.value)} />
+        </div>
+        <div className="pick">
+          <div className="pl">PIN（あいことば）</div>
+          <input className="tinput" value={pin} type="password" inputMode="numeric" maxLength={12}
+            placeholder="自分だけの合言葉（3文字以上）"
+            onChange={(e) => setPin(e.target.value)} />
+        </div>
+        {mode === "new" && (
+          <div className="pick">
+            <div className="pl">PIN（確認）</div>
+            <input className="tinput" value={pin2} type="password" inputMode="numeric" maxLength={12}
+              placeholder="もう一度入力"
+              onChange={(e) => setPin2(e.target.value)} />
+          </div>
+        )}
+        {err && <p className="note" style={{ color: "var(--down)" }}>{err}</p>}
+        <button className="primary" disabled={busy} onClick={submit}>
+          {busy ? "確認中…" : <><span>{mode === "new" ? "登録してはじめる" : "続きから記録する"}</span> <ChevronRight size={16} /></>}
+        </button>
+        <button className="ghostbtn" onClick={() => { setStep("pick"); setErr(""); }}>← クラス・班を選び直す</button>
+        <p className="note">PINは本名やメールの代わりの「合言葉」です。他の人には教えないでください。忘れると引き継げません。</p>
+      </section>
+    );
+  }
 
   return (
     <section className="setup">
       <div className="eyebrow">SETUP</div>
       <h1>クラスと班を選ぶ</h1>
-      <p className="lede">あなたの記録は、選んだ班の<b>匿名の集計</b>にだけ使われます。名前やメールは登録しません。</p>
+      <p className="lede">あなたの記録は、選んだ班の<b>匿名の集計</b>にだけ使われます。本名やメールは登録しません。</p>
       <div className="pick">
         <div className="pl">クラス</div>
         <div className="grid">
@@ -306,8 +380,8 @@ function Setup({ onDone }: { onDone: (classId: number, slot: number) => void }) 
           })}
         </div>
       </div>
-      <button className="primary" disabled={!cls || !grp || busy} onClick={go}>
-        {busy ? "参加中…" : <><span>はじめる</span> <ChevronRight size={16} /></>}
+      <button className="primary" disabled={!cls || !grp} onClick={() => { setErr(""); setStep("id"); }}>
+        <span>つぎへ（名前を決める）</span> <ChevronRight size={16} />
       </button>
       <p className="note">あとから「変更」でいつでも切り替えられます。</p>
     </section>
@@ -735,6 +809,13 @@ const CSS = `
 .primary{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:var(--origin);color:#fff;border:0;border-radius:10px;padding:13px;font-family:var(--sans);font-size:14.5px;font-weight:700;cursor:pointer;letter-spacing:.02em}
 .primary:hover{background:#11141a}
 .primary:disabled{background:#c4c9d1;cursor:not-allowed}
+.tinput{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px 13px;font-family:var(--sans);font-size:15px;background:#fff;color:var(--ink)}
+.tinput:focus{outline:none;border-color:var(--up)}
+.segmented{display:flex;gap:6px;background:#eef0f3;border-radius:11px;padding:4px;margin:8px 0 4px}
+.segmented button{flex:1;background:none;border:0;border-radius:8px;padding:10px 6px;font-family:var(--sans);font-size:13px;color:var(--muted);cursor:pointer;font-weight:600}
+.segmented button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(30,34,42,.08)}
+.ghostbtn{width:100%;background:none;border:0;color:var(--muted);font-family:var(--sans);font-size:12.5px;cursor:pointer;padding:12px;margin-top:2px}
+.ghostbtn:hover{color:var(--ink)}
 .deltas{display:flex;gap:10px;margin-bottom:22px}
 .delta{flex:1;text-align:center;border:1px solid var(--line);border-radius:10px;padding:13px 6px;background:#fff}
 .delta .dv{font-family:var(--mono);font-size:24px;font-weight:700;line-height:1}

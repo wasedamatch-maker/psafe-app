@@ -173,7 +173,7 @@ export default function DemoApp() {
       <header className="head">
         <div className="topbar">
           <span className="eyebrow">EDMONDSON · 7 ITEMS</span>
-          <span className="ctx" style={{ cursor: "default" }}>デモクラス · デモ班</span>
+          <span className="ctx" style={{ cursor: "default" }}>あお · デモ班</span>
         </div>
         <h1>あなたの感覚に合わせてスライドしてみよう！</h1>
         <p className="lede">「どちらでもない」を基準（0）として、班での「今」の感じ方を左右に置きます。点数ではなく、変化を測るためのもの。<b>数値は誰にも見えません。</b></p>
